@@ -39,6 +39,8 @@ brand_directory (read-only seed data)
 | `avatar_url` | text |  |
 | `default_household_id` | text references households(id) |  |
 | `locale` | text default 'ko' |  |
+| `training_consent` | boolean not null default false | opt-in to use this user's photos for our own vision model training. See `docs/DATA_STRATEGY.md` |
+| `consent_granted_at` | timestamptz | nullable; set when `training_consent` flips false→true. Photos created BEFORE this date are NOT eligible for training (retroactive consent guard for PIPC compliance) |
 | `created_at` | timestamptz default now() |  |
 
 ### `households`
@@ -209,6 +211,38 @@ Our Korean product database. Seeded from manufacturer catalogs and updated quart
 | `updated_at` | timestamptz |  |
 
 Indexes: `(brand)`, `(category)`. We match an OCR'd model string against `model_pattern` regexes; fastest match wins.
+
+### `vision_extractions` (write-only log — every Claude vision call recorded here)
+
+Every call to `VisionService.extractLabel(photo)` writes a row, regardless of outcome (success, error, low confidence). This is **the long-term training dataset for our future in-house model** — see `docs/DATA_STRATEGY.md`. Treat as append-only; never UPDATE except for `usable_for_training` flag and `user_corrected_json`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | text PK | nanoid |
+| `created_at` | timestamptz default now() |  |
+| `household_id` | text references households(id) on delete cascade | scopes the row to a household for retention enforcement |
+| `product_id` | text references products(id) on delete set null | nullable; populated after the user saves the extracted product |
+| `r2_key_original` | text | path to the original full-resolution photo in R2 |
+| `r2_key_thumbnail` | text | path to the 800px thumbnail (always retained) |
+| `model_id` | text not null | e.g., `claude-sonnet-4-6`. Tracks which model produced the extraction |
+| `prompt_version` | text not null | e.g., `vision_label_v1`. Bumped whenever we change the system prompt |
+| `extraction_json` | jsonb not null | raw response from the model (brand, model, category, serial, confidence, notes) |
+| `extraction_zod_valid` | boolean not null | whether the response passed our Zod schema |
+| `latency_ms` | integer not null |  |
+| `input_tokens` | integer | nullable on errors |
+| `output_tokens` | integer | nullable on errors |
+| `cost_usd` | numeric(10,6) | nullable on errors |
+| `error_code` | text | nullable; populated on API errors (`5mb_exceeded`, `rate_limit`, etc.) |
+| `user_corrected_json` | jsonb | nullable; the user's final values after they edited the review screen. This is the GROUND TRUTH for training |
+| `matched_product_db_id` | text references product_db(id) | nullable; whether we matched into our Korean product DB |
+| `usable_for_training` | boolean not null default false | computed weekly: `users.training_consent = true AND created_at >= consent_granted_at AND extraction_zod_valid = true AND user_corrected_json IS NOT NULL`. The training-set exporter filters on this flag. |
+
+Indexes: `(household_id, created_at desc)`, `(product_id)`, `(usable_for_training, created_at)` partial.
+
+**Retention**:
+- For `training_consent=false` users: original photo (`r2_key_original`) deleted at +30d, only thumbnail + extraction_json kept (no PII in either).
+- For `training_consent=true` users: original retained indefinitely in the `sallim-training` R2 bucket (anonymized — EXIF stripped, label-region cropped).
+- On account/household delete: full cascade including R2 objects, including the long-term training bucket. Hard-deleted within 7 days per privacy policy.
 
 ### `product_details` (read-only, derived from manual PDF parsing)
 

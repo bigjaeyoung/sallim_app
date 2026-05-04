@@ -16,7 +16,7 @@
 
 - **Mobile**: Expo (React Native, TypeScript, expo-router). Single codebase for iOS + Android.
 - **API**: NestJS (TypeScript). Hosted on Railway.
-- **DB** (M2+): PostgreSQL via Supabase + Prisma.
+- **DB** (M2+): PostgreSQL via Neon (serverless) + Prisma.
 - **File storage** (M4+): Cloudflare R2 for label photos.
 - **Auth** (M2+): phone OTP via Twilio Verify.
 - **AI Vision** (M4+): Anthropic `claude-sonnet-4-6` — extracts brand/model/category from label photos.
@@ -107,4 +107,5 @@ Env vars: `apps/api/.env.example` and `apps/mobile/.env.example`. **NEVER commit
 - **Email receipt import** → `docs/EMAIL_IMPORT.md`
 - **Korean product DB & seed strategy** → `docs/PRODUCT_DB.md`
 - **Privacy / PIPC compliance** → `docs/PRIVACY.md`
+- **🎯 Long-term data strategy (Anthropic → in-house model)** → `docs/DATA_STRATEGY.md`
 - **M0 results (historical)** → `사업개발/build/sallim/docs/M0_REPORT.md`

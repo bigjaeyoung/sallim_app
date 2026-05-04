@@ -62,6 +62,7 @@ Read these in order before any non-trivial change:
 5. **`docs/EMAIL_IMPORT.md`** — Korean e-commerce receipt parsing (M6)
 6. **`docs/PRODUCT_DB.md`** — Korean product database structure (M3)
 7. **`docs/PRIVACY.md`** — PIPC compliance, data inventory
+8. **`docs/DATA_STRATEGY.md`** — long-term plan: replace Anthropic with our own model trained on accumulated user data (consent-gated)
 
 ---
 

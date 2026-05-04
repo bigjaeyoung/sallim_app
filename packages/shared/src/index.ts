@@ -4,3 +4,4 @@
 // schema should also export the inferred type via `z.infer`.
 
 export * from './health.js';
+export * from './auth.js';

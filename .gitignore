@@ -49,3 +49,4 @@ android/app/release/
 .cache/
 *.tgz
 .turbo/
+_tmp_*

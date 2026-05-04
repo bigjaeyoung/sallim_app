@@ -1,0 +1,307 @@
+// Sallim DB schema — source of truth in code form.
+// Source spec: docs/DATA_MODEL.md (keep that doc and this file in sync per PR).
+//
+// Conventions:
+// - All IDs are nanoid strings (12-21 chars), generated app-side.
+// - All timestamps are timestamptz.
+// - Cascade deletes follow the household ownership tree.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearchPostgres"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+// ─── Auth & identity ──────────────────────────────────────────────────────
+
+model User {
+  id                  String    @id
+  phone               String?   @unique
+  email               String?   @unique
+  kakaoId             String?   @unique @map("kakao_id")
+  name                String?
+  avatarUrl           String?   @map("avatar_url")
+  defaultHouseholdId  String?   @map("default_household_id")
+  locale              String    @default("ko")
+  trainingConsent     Boolean   @default(false) @map("training_consent")
+  consentGrantedAt    DateTime? @map("consent_granted_at") @db.Timestamptz
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  memberships         HouseholdMember[]
+  sentInvites         HouseholdInvite[] @relation("inviter")
+  acceptedInvites     HouseholdInvite[] @relation("acceptee")
+  emailIntegrations   EmailIntegration[]
+  notificationTokens  NotificationToken[]
+  createdHouseholds   Household[]       @relation("household_creator")
+
+  @@map("users")
+}
+
+model Household {
+  id            String   @id
+  name          String
+  addressLabel  String?  @map("address_label")
+  createdById   String   @map("created_by")
+  plan          String   @default("free")
+  planExpiresAt DateTime? @map("plan_expires_at") @db.Timestamptz
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  createdBy           User                 @relation("household_creator", fields: [createdById], references: [id])
+  members             HouseholdMember[]
+  invites             HouseholdInvite[]
+  products            Product[]
+  receipts            Receipt[]
+  visionExtractions   VisionExtraction[]
+
+  @@map("households")
+}
+
+model HouseholdMember {
+  userId      String   @map("user_id")
+  householdId String   @map("household_id")
+  role        String // "owner" | "member" | "viewer"
+  joinedAt    DateTime @default(now()) @map("joined_at") @db.Timestamptz
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@id([userId, householdId])
+  @@index([householdId])
+  @@map("household_members")
+}
+
+model HouseholdInvite {
+  id           String    @id
+  householdId  String    @map("household_id")
+  inviterId    String    @map("inviter_id")
+  targetPhone  String?   @map("target_phone")
+  token        String    @unique
+  role         String    @default("member")
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz
+  acceptedById String?   @map("accepted_by")
+  acceptedAt   DateTime? @map("accepted_at") @db.Timestamptz
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  household  Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  inviter    User      @relation("inviter", fields: [inviterId], references: [id])
+  acceptedBy User?     @relation("acceptee", fields: [acceptedById], references: [id])
+
+  @@map("household_invites")
+}
+
+// ─── Products & related ───────────────────────────────────────────────────
+
+model Product {
+  id                    String   @id
+  householdId           String   @map("household_id")
+  category              String // see lib/categories.ts
+  displayName           String   @map("display_name")
+  brand                 String?
+  model                 String?
+  serial                String?
+  linkedProductDbId     String?  @map("linked_product_db_id")
+  purchasedAt           DateTime? @map("purchased_at") @db.Date
+  purchasePrice         Int?     @map("purchase_price")
+  retailer              String?
+  warrantyUntil         DateTime? @map("warranty_until") @db.Date
+  warrantySpecialNotes  String?  @map("warranty_special_notes")
+  isSubscription        Boolean  @default(false) @map("is_subscription")
+  room                  String?
+  notes                 String?
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  household       Household       @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  linkedProductDb ProductDb?      @relation(fields: [linkedProductDbId], references: [id])
+  photos          ProductPhoto[]
+  serviceEvents   ServiceEvent[]
+  reminders       Reminder[]
+
+  @@index([householdId])
+  @@index([householdId, category])
+  @@index([linkedProductDbId])
+  @@map("products")
+}
+
+model ProductPhoto {
+  id        String   @id
+  productId String   @map("product_id")
+  kind      String // "label" | "front" | "room" | "serial"
+  r2Key     String   @map("r2_key")
+  width     Int?
+  height    Int?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_photos")
+}
+
+model Receipt {
+  id                String   @id
+  householdId       String   @map("household_id")
+  source            String // "gmail" | "naver" | "manual"
+  sourceMessageId   String?  @map("source_message_id")
+  vendor            String
+  totalAmount       Int?     @map("total_amount")
+  currency          String   @default("KRW")
+  purchasedAt       DateTime? @map("purchased_at") @db.Date
+  rawHtml           String?  @map("raw_html")
+  extractedItems    Json?    @map("extracted_items")
+  linkedProductId   String?  @map("linked_product_id")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  household Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@unique([householdId, sourceMessageId])
+  @@map("receipts")
+}
+
+model ServiceEvent {
+  id          String   @id
+  productId   String   @map("product_id")
+  kind        String // "repair" | "cleaning" | "inspection" | "parts"
+  vendor      String?
+  occurredOn  DateTime? @map("occurred_on") @db.Date
+  cost        Int?
+  notes       String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("service_events")
+}
+
+model Reminder {
+  id              String   @id
+  productId       String   @map("product_id")
+  kind            String // "warranty_30d" | "warranty_7d" | "consumable_due" | "cleaning_due"
+  consumableKind  String?  @map("consumable_kind")
+  notifyAt        DateTime @map("notify_at") @db.Timestamptz
+  status          String   @default("pending") // "pending" | "sent" | "dismissed"
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([notifyAt, status])
+  @@map("reminders")
+}
+
+// ─── Email integration & push ────────────────────────────────────────────
+
+model EmailIntegration {
+  id                    String    @id
+  userId                String    @map("user_id")
+  provider              String // "gmail" | "naver"
+  emailAddress          String    @map("email_address")
+  oauthAccessTokenEnc   Bytes     @map("oauth_access_token_enc")
+  oauthRefreshTokenEnc  Bytes?    @map("oauth_refresh_token_enc")
+  expiresAt             DateTime? @map("expires_at") @db.Timestamptz
+  lastSyncedAt          DateTime? @map("last_synced_at") @db.Timestamptz
+  status                String    @default("active") // "active" | "revoked" | "error"
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_integrations")
+}
+
+model NotificationToken {
+  id             String    @id
+  userId         String    @map("user_id")
+  expoPushToken  String    @map("expo_push_token")
+  deviceId       String?   @map("device_id")
+  lastActiveAt   DateTime? @map("last_active_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_tokens")
+}
+
+// ─── Korean product DB (read-mostly seed data) ────────────────────────────
+
+model ProductDb {
+  id                      String   @id
+  brand                   String
+  modelPattern            String   @map("model_pattern")
+  category                String
+  displayBrand            String?  @map("display_brand")
+  displayModel            String?  @map("display_model")
+  manualPdfUrl            String?  @map("manual_pdf_url")
+  manualHtmlUrl           String?  @map("manual_html_url")
+  defaultWarrantyMonths   Int?     @map("default_warranty_months")
+  specialWarrantyRules    Json?    @map("special_warranty_rules")
+  images                  String[]
+  updatedAt               DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  productDetails    ProductDetails?
+  products          Product[]
+  visionExtractions VisionExtraction[]
+
+  @@index([brand])
+  @@index([category])
+  @@map("product_db")
+}
+
+model ProductDetails {
+  productDbId         String    @id @map("product_db_id")
+  thumbnailUrl        String?   @map("thumbnail_url")
+  usageSummaryMd      String?   @map("usage_summary_md")
+  consumables         Json?
+  maintenanceTips     Json?     @map("maintenance_tips")
+  manualParsedAt      DateTime? @map("manual_parsed_at") @db.Timestamptz
+  manualSourcePdfUrl  String?   @map("manual_source_pdf_url")
+  parserVersion       String?   @map("parser_version")
+
+  productDb ProductDb @relation(fields: [productDbId], references: [id], onDelete: Cascade)
+
+  @@map("product_details")
+}
+
+model BrandDirectory {
+  brand         String   @id // "samsung", "lg", ...
+  displayName   String?  @map("display_name")
+  asPhone       String?  @map("as_phone")
+  asKakaoUrl    String?  @map("as_kakao_url")
+  asWebUrl      String?  @map("as_web_url")
+  supportHours  String?  @map("support_hours")
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("brand_directory")
+}
+
+// ─── Long-term training dataset (DATA_STRATEGY.md) ───────────────────────
+
+model VisionExtraction {
+  id                   String   @id
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+  householdId          String   @map("household_id")
+  productId            String?  @map("product_id")
+  r2KeyOriginal        String?  @map("r2_key_original")
+  r2KeyThumbnail       String?  @map("r2_key_thumbnail")
+  modelId              String   @map("model_id") // e.g., "claude-sonnet-4-6"
+  promptVersion        String   @map("prompt_version") // e.g., "vision_label_v1"
+  extractionJson       Json     @map("extraction_json")
+  extractionZodValid   Boolean  @map("extraction_zod_valid")
+  latencyMs            Int      @map("latency_ms")
+  inputTokens          Int?     @map("input_tokens")
+  outputTokens         Int?     @map("output_tokens")
+  costUsd              Decimal? @map("cost_usd") @db.Decimal(10, 6)
+  errorCode            String?  @map("error_code")
+  userCorrectedJson    Json?    @map("user_corrected_json")
+  matchedProductDbId   String?  @map("matched_product_db_id")
+  usableForTraining    Boolean  @default(false) @map("usable_for_training")
+
+  household       Household  @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  matchedProductDb ProductDb? @relation(fields: [matchedProductDbId], references: [id])
+
+  @@index([householdId, createdAt(sort: Desc)])
+  @@index([productId])
+  @@index([usableForTraining, createdAt])
+  @@map("vision_extractions")
+}

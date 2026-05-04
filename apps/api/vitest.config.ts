@@ -5,4 +5,8 @@ export default defineConfig({
     environment: 'node',
     include: ['test/**/*.test.ts', 'src/**/*.test.ts'],
   },
+  esbuild: {
+    // Required for NestJS (decorators) inside vitest.
+    target: 'es2022',
+  },
 });

@@ -80,7 +80,7 @@ If any gate fails: STOP. Document failure mode in `docs/M0_REPORT.md`. Do not pr
 **Goal**: User signs up via phone OTP, lands in their default household, can edit their profile.
 
 ### Tasks
-- [ ] Provision Supabase Postgres. Capture connection strings.
+- [ ] Provision Neon Postgres (https://console.neon.tech). Capture pooled and direct connection strings (`DATABASE_URL` and `DIRECT_DATABASE_URL`).
 - [ ] Add Prisma to `apps/api`. Implement schema from `docs/DATA_MODEL.md`. Run migration.
 - [ ] Phone OTP flow (Twilio Verify):
   - `POST /auth/send-otp` { phone } → sends code.
@@ -168,20 +168,28 @@ If any gate fails: STOP. Document failure mode in `docs/M0_REPORT.md`. Do not pr
 - [ ] Mobile: photo upload to API.
 - [ ] API: `POST /products/extract` accepts photo (multipart). Stores in R2. Calls `VisionService.extractLabel(photo)`.
 - [ ] `VisionService` calls Claude Sonnet 4.6 vision with the prompt from `docs/VISION_PIPELINE.md`. Returns `{ brand, model, category, serial?, confidence }`.
-- [ ] API resolves brand+model against `product_db` via `ProductDbService.findByModel`. If matched, hydrate manual URL, default warranty.
+- [ ] **Every** call writes a row to `vision_extractions` (regardless of success/error) — see `docs/DATA_STRATEGY.md`. Capture `model_id`, `prompt_version`, `extraction_json`, `latency_ms`, `input_tokens`, `output_tokens`, `cost_usd`, `error_code`.
+- [ ] User's review-screen edits write back to the same `vision_extractions` row as `user_corrected_json` — this is the ground-truth label for our future training set.
+- [ ] API resolves brand+model against `product_db` via `ProductDbService.findByModel`. If matched, hydrate manual URL, default warranty, and set `vision_extractions.matched_product_db_id`.
 - [ ] `POST /products` creates the product with extracted + DB-hydrated data. `purchased_at` defaults to today (user editable).
 - [ ] Mobile: review screen showing extracted fields, photo, suggested category. User can edit each. Tap "저장".
+- [ ] **Training-data consent (opt-in)**: in onboarding (right after first photo) AND in Settings, present a toggle "내 사진을 살림 AI 학습에 사용해도 됨". Default OFF. Wire to `users.training_consent` + `consent_granted_at`. Copy and behavior per `docs/PRIVACY.md` "AI training opt-in" section.
+- [ ] R2 bucket split: `sallim-photos` (short-term, all users) + `sallim-training` (long-term, consent-only, anonymized — EXIF stripped, label-region cropped). Photo uploader writes to both when consent is on; only the first when consent is off.
+- [ ] Cron job (weekly): recompute `vision_extractions.usable_for_training` based on current consent state; remove rows from training set when consent withdrawn or account deleted.
 - [ ] Mobile: home screen lists products for current household. Empty state with "+ 추가" CTA.
 - [ ] Mobile: product detail screen showing photo, brand, model, warranty, A/S phone (tappable), KakaoTalk button (if available), notes.
-- [ ] Tests: extraction service unit tests with fixture photos; `findByModel` covered.
+- [ ] Tests: extraction service unit tests with fixture photos; `findByModel` covered; **`vision_extractions` row is written on every call (success + error paths)**; consent gate correctly excludes pre-consent photos from training set.
 
 ### Acceptance criteria
 - I take a photo of a Samsung refrigerator label; within 6 seconds I see the review screen with brand, model, category prefilled correctly.
 - After save, the product appears on home screen with correct manual link.
 - Tapping the A/S phone number on detail screen opens the phone dialer with `1588-3366`.
+- A row exists in `vision_extractions` for every photo I uploaded (verified via `db:studio`).
+- If I have not granted training consent, my photo's `r2_key_original` does NOT appear in the `sallim-training` bucket.
+- After granting consent and uploading a NEW photo, that photo's row in `vision_extractions` has `usable_for_training=true` (after the weekly cron) but my OLD pre-consent photos do not.
 
 ### Out of scope
-- Email import (M6), warranty alerts (M5), service event log (M7).
+- Email import (M6), warranty alerts (M5), service event log (M7), training-set exporter (M9 or later when 50K+ usable rows).
 
 ---
 

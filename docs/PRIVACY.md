@@ -14,7 +14,9 @@ We collect personal data. Korean PIPC (개인정보보호법) is strict. This fi
 | Profile photo | User upload | UI personalization | Lifetime |
 | KakaoTalk ID | Optional Kakao login | Auth | Lifetime |
 | Address label | Household setting (free text, optional) | Multi-household selection | Lifetime |
-| Product photos (labels, room shots) | User upload | Product extraction + display | 30 days original, then thumbnail; thumbnail lifetime |
+| Product photos (labels, room shots) — base | User upload | Product extraction + display | 30 days original, then thumbnail; thumbnail lifetime |
+| Product photos — **AI training set** (opt-in) | User upload + explicit consent | Improve our own vision model (Sallim's long-term replacement for Anthropic — see `docs/DATA_STRATEGY.md`) | Indefinite, anonymized; deleted on consent withdrawal or account deletion |
+| Vision API call logs (`vision_extractions`) | Every label extraction | Operational debugging + (with consent) future model training | Indefinite for ops metadata; original photo retention follows row above |
 | Receipt content (HTML) | Email import | Parse purchase data | 90 days raw; structured data lifetime |
 | Email OAuth tokens | Gmail/Naver OAuth | Periodic sync | Until user disconnects; encrypted at rest |
 | Device push tokens | App registration | Notifications | Until logout / token rotation |
@@ -36,7 +38,7 @@ We collect personal data. Korean PIPC (개인정보보호법) is strict. This fi
 ## Encryption
 
 - All HTTPS traffic in transit.
-- Postgres at rest: encrypted by Supabase by default.
+- Postgres at rest: encrypted by Neon by default (AES-256, AWS KMS-backed).
 - R2 photos: encrypted at rest by Cloudflare.
 - Sensitive fields (`oauth_access_token_enc`, `oauth_refresh_token_enc`) encrypted application-side using libsodium sealed boxes. Master key in env var, rotated annually.
 
@@ -62,7 +64,7 @@ We disclose these in the privacy policy:
 
 | Vendor | Purpose | Data shared |
 |---|---|---|
-| Supabase | DB hosting | All structured data (encrypted at rest) |
+| Neon | DB hosting (PostgreSQL serverless) | All structured data (encrypted at rest, AWS Singapore region) |
 | Cloudflare R2 | Photo storage | Product photos |
 | Anthropic | AI vision + receipt parsing | Photo bytes; sanitized email text |
 | OpenAI | (none, V2) | n/a |
@@ -88,15 +90,44 @@ The app is not designed for users under 14. We don't knowingly collect data from
 Several processors are US-based. We disclose this. For PIPC, we will:
 - Get explicit consent for international transfer at signup.
 - List recipients in the privacy policy.
-- Where possible, prefer Korean / APAC region for processors (Supabase has APAC; R2 has APAC).
+- Where possible, prefer Korean / APAC region for processors (Neon has Singapore + Tokyo; R2 has APAC).
 
 ---
 
 ## Anthropic specifics
 
-- We use Anthropic's API in default mode where data is not used to train models.
+- We use Anthropic's API in default mode where data is not used to train models (per Anthropic's standard API terms).
 - We do not pass identifiable user data (name, phone) into prompts. Photos and email text contain user info that's needed for the function — we minimize and document this.
-- We do not log AI inputs/outputs containing PII beyond 30 days.
+- We do not log AI inputs/outputs containing PII beyond 30 days for users without `training_consent`.
+- **Anthropic is a bridge, not the destination.** See `docs/DATA_STRATEGY.md` — we are accumulating a labeled dataset to train our own model, eventually replacing Anthropic. The training-data path requires explicit user opt-in (next section).
+
+---
+
+## AI training opt-in (data-asset strategy)
+
+Sallim's long-term plan is to train a Korean-appliance-specialized vision model that replaces our Anthropic API dependency (see `docs/DATA_STRATEGY.md`). To do this we need labeled photo data accumulated over time. We obtain this data only with **explicit, granular, withdrawable consent**.
+
+### Consent rules
+
+- **Opt-in only.** Default `training_consent` is `false`. We never collect for training without an affirmative tap.
+- **Granular.** A separate consent toggle, distinct from "use the app". A user can use Sallim without contributing.
+- **Forward-only.** When a user grants consent, only photos taken AFTER that moment (`users.consent_granted_at` timestamp) are eligible for training. Pre-consent photos remain on the standard 30-day retention.
+- **Withdrawable.** Users can flip the toggle off in Settings at any time. On withdrawal, we (a) stop adding new rows to the training set and (b) within 7 days, remove all of that user's photos from the training bucket and `usable_for_training` flags from `vision_extractions`.
+- **Information disclosed at consent moment**:
+  - "Sallim will use your label photos to improve our own AI. We never share with advertisers. You can turn this off any time."
+  - Link to this privacy section.
+
+### What we do with consented data
+
+- Photos are anonymized (EXIF stripped, label-region cropped) before entering the training bucket.
+- We never associate training-set photos with personal identifiers (no `user_id`, `phone`, `email` in the training dataset). Only an opaque hash for deduplication.
+- We do not share the training dataset with third parties. Only Sallim's internal ML training pipeline reads it.
+
+### What is in `vision_extractions` (covered by consent or not)
+
+The `vision_extractions` table is **always written** (regardless of consent) for operational debugging — it contains the API call's metadata (latency, cost, error code, structured extraction). However:
+- The `usable_for_training` flag is `true` ONLY when consent applies.
+- For users without consent, the original photo (`r2_key_original`) is deleted at +30d. Only the 800×600 thumbnail and structured extraction (no PII) remain.
 
 ---
 
