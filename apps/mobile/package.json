@@ -1,0 +1,42 @@
+{
+  "name": "@sallim/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "lint": "eslint app __tests__",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "build": "echo 'mobile build is done via EAS — see eas.json'"
+  },
+  "dependencies": {
+    "@babel/runtime": "^7.25.0",
+    "@expo/metro-runtime": "~3.2.3",
+    "@sallim/shared": "workspace:*",
+    "expo": "~54.0.0",
+    "expo-constants": "~18.0.0",
+    "expo-linking": "~8.0.0",
+    "expo-router": "~6.0.0",
+    "expo-status-bar": "~3.0.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-screens": "~4.16.0",
+    "react-native-web": "~0.21.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@types/react": "~19.1.0",
+    "@types/react-test-renderer": "^19.0.0",
+    "react-test-renderer": "19.1.0",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

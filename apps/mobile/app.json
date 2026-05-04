@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "살림",
+    "slug": "sallim",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "sallim",
+    "platforms": ["ios", "android"],
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.bigjaeyoung.sallim"
+    },
+    "android": {
+      "package": "com.bigjaeyoung.sallim",
+      "adaptiveIcon": {
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
